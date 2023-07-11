@@ -13,7 +13,11 @@ dcaRoutes.get(
       account: Joi.string().max(42).required(),
     }),
   }),
-  dcaController.getUserDCAPositions
+  dcaController.getUserPositions
+);
+dcaRoutes.get(
+  "/positions/active/get-info",
+  dcaController.getActivePositionInfo
 );
 
 export default dcaRoutes;

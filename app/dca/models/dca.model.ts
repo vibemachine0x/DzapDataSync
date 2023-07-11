@@ -7,6 +7,7 @@ export const dcaSchema = (mongoose: any) => {
     id: { type: String, required: true },
     account: { type: String, required: true },
     contract: { type: String, required: true },
+    chainId: { type: Number },
     createdAtTimestamp: { type: Number, required: true },
     lastUpdatedAt: { type: Number, required: true },
     status: { type: String, required: true },
@@ -33,12 +34,16 @@ export const dcaSchema = (mongoose: any) => {
           recipient: String,
           fromAmount: String,
           toAmount: String,
+          rate: String,
+          prevRate: String,
+          remainingSwaps: String,
+          prevRemainingSwaps: String,
+          swapped: String,
         },
         required: true,
       },
     ],
   });
-
   const DCA = mongoose.model("dca", schema);
   return DCA;
 };

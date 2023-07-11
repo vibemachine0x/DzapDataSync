@@ -18,10 +18,11 @@ const subscribeEvents = (chainId: number) => {
   listenEvents(contract, DCAEvents.modify, handleModifyEventData);
   listenEvents(contract, DCAEvents.claim, handleClaimEventData);
 };
+
 export const initDCA = () => {
   if (false) {
     startScript();
   }
   subscribeEvents(NetworkIDs.polygon);
-  //   subscribeEvents(NetworkIDs.zkSync);
+  subscribeEvents(NetworkIDs.zkSync);
 };

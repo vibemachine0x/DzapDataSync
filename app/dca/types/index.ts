@@ -20,6 +20,7 @@ export type PositionHistory = {
 export type DCAPositionInfo = {
   id: string;
   account: string;
+  chainId: number;
   contract: string;
   createdAtTimestamp: number;
   lastUpdatedAt: number;

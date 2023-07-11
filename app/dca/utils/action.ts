@@ -1,6 +1,10 @@
 import { BigNumber } from "ethers";
+import { getUnixTimestamp, intervalsFromBytes } from ".";
 import { PositionStatus } from "../enums";
-import { apiGetPositionDetails } from "../persistence/sync.persistence";
+import {
+  apiGetActivePositionInfo,
+  apiGetPositionDetails,
+} from "../persistence/sync.persistence";
 import { createPositionService } from "../services/sync.services";
 import { DCAPositionInfo, PositionHistory } from "../types";
 
@@ -18,10 +22,11 @@ export const handleCreateEventData = async (data: any, contract: any) => {
       swapsLeft,
     } = await contract.getPositionDetails(positionId);
 
-    const currentTimestamp = Date.now();
+    const currentTimestamp = getUnixTimestamp();
 
     const positionInfo: DCAPositionInfo = {
       account,
+      chainId: (await contract.provider.getNetwork()).chainId,
       contract: contract.address,
       createdAtTimestamp: currentTimestamp,
       from: {
@@ -68,47 +73,41 @@ export const handleModifyEventData = async (data: any, contract: any) => {
   const positionId = data[1].toString();
   const rate = data[2].toString();
   const startingSwap = data[3];
-  const finalSwap = data[4].toString();
+  const finalSwap = data[4];
+  const currentTimestamp = getUnixTimestamp();
+
   const position = await apiGetPositionDetails(
     account,
     contractAddress,
     positionId
   );
-
-  console.log(JSON.stringify(data));
-
   // previous position values
   const previousPositionRate = position.rate;
   const previousRemainingSwaps = position.remainingSwaps;
   const previousUnswapped = BigNumber.from(previousPositionRate).mul(
     previousRemainingSwaps
   );
-
   position.rate = rate;
   position.remainingSwaps = finalSwap.sub(startingSwap).toString();
   const unswapped = BigNumber.from(position.rate).mul(position.remainingSwaps);
-
   position.totalDeposited = BigNumber.from(position.totalDeposited)
     .sub(previousUnswapped)
     .add(unswapped);
   position.totalSwaps = BigNumber.from(position.totalSwaps)
     .sub(previousRemainingSwaps)
     .add(position.remainingSwaps);
-  position.lastUpdatedAt = Date.now();
+  position.lastUpdatedAt = currentTimestamp;
 
-  // Remove position from active position
   if (BigNumber.from(position.remainingSwaps).eq("0")) {
     position.status = PositionStatus.completed;
-    // pairLibrary.removeActivePosition(position);
   } else if (position.status != PositionStatus.active) {
     position.status = PositionStatus.active;
-    // pairLibrary.addActivePosition(position);
   }
 
   // history
   const modifiedData: PositionHistory = {
     action: PositionStatus.modified,
-    createdAtTimestamp: Date.now(),
+    createdAtTimestamp: currentTimestamp,
     transactionHash: eventData.transactionHash,
     rate: position.rate,
     prevRate: previousPositionRate,
@@ -119,13 +118,47 @@ export const handleModifyEventData = async (data: any, contract: any) => {
   position.save();
 };
 
-export const handleSwapEventData = (data: any) => {
+export const handleSwapEventData = async (data: any, contract: any) => {
   const swappedData = data[2];
   const eventData = data[3];
-  const hash = eventData.transactionHash;
-  const timestamp = Date.now();
+  const currentTimestamp = getUnixTimestamp();
+  const intervals: number[] = [];
   swappedData.forEach((swapInfo: any) => {
-    console.log(swapInfo);
+    intervals.push(...intervalsFromBytes(swapInfo.intervalsInSwap));
+  });
+  const activePositions = await apiGetActivePositionInfo(intervals);
+  const positionDetails = await Promise.all(
+    activePositions.map(
+      async (position: DCAPositionInfo) =>
+        await contract.getPositionDetails(position.id)
+    )
+  );
+  activePositions.forEach((position: DCAPositionInfo, index: number) => {
+    const remainingSwaps = BigNumber.from(position.remainingSwaps).sub(1);
+    if (remainingSwaps.eq(0)) {
+      position.status = PositionStatus.completed;
+    }
+    position.remainingSwaps = remainingSwaps.toString();
+    position.totalExecutedSwaps = BigNumber.from(position.remainingSwaps)
+      .add(1)
+      .toString();
+    position.totalAmountSwapped = BigNumber.from(position.rate)
+      .add(position.totalAmountSwapped)
+      .toString();
+    const userReturnAmount =
+      positionDetails[index].swapped.sub(position.toWithdraw) || 0;
+    position.totalAmountReturned = BigNumber.from(userReturnAmount)
+      .add(position.totalAmountReturned)
+      .toString();
+    position.history.push({
+      createdAtTimestamp: currentTimestamp,
+      fromAmount: position.rate,
+      toAmount: userReturnAmount.toString(),
+      action: PositionStatus.swapped,
+      transactionHash: eventData.transactionHash,
+    });
+    activePositions[index] = position;
+    activePositions[index].save();
   });
 };
 
@@ -141,14 +174,13 @@ export const handleClaimEventData = async (data: any, contract: any) => {
     contractAddress,
     positionId
   );
-
   position.toWithdraw = "0";
   position.totalWithdrawn = BigNumber.from(position.totalWithdrawn).add(
     swapped
   );
   const claimData: PositionHistory = {
     action: PositionStatus.claim,
-    createdAtTimestamp: Date.now(),
+    createdAtTimestamp: getUnixTimestamp(),
     transactionHash: eventData.transactionHash,
     recipient,
     swapped: swapped.toString(),
@@ -164,9 +196,10 @@ export const handleTerminateEventData = async (data: any, contract: any) => {
   const eventData = data[6];
   const positionId = data[2].toString();
   const swapped = data[4];
+  const currentTimestamp = getUnixTimestamp();
   const terminationData: PositionHistory = {
     action: PositionStatus.terminated,
-    createdAtTimestamp: Date.now(),
+    createdAtTimestamp: currentTimestamp,
     transactionHash: eventData.transactionHash,
     recipient,
   };
@@ -181,6 +214,6 @@ export const handleTerminateEventData = async (data: any, contract: any) => {
   position.totalWithdrawn = BigNumber.from(position.totalWithdrawn).add(
     swapped
   );
-  position.lastUpdatedAt = Date.now();
+  position.lastUpdatedAt = currentTimestamp;
   position.save();
 };

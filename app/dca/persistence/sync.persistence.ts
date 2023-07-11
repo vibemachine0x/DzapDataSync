@@ -1,3 +1,4 @@
+import { PositionStatus } from "../enums";
 import db from "../models";
 
 const DCA = db.dca;
@@ -22,9 +23,28 @@ export const apiGetPositionDetails = async (
 };
 
 export const apiGetUserDCAPositions = async (account: string) => {
-  const condition = account
-    ? { account: { $regex: new RegExp(account), $options: "i" } }
-    : {};
+  const condition = { account: { $regex: new RegExp(account), $options: "i" } };
   const res = await DCA.find(condition);
   return res;
+};
+
+export const apiUpdatePositionById = async (account: string) => {
+  const condition = { account: { $regex: new RegExp(account), $options: "i" } };
+  const res = await DCA.find(condition);
+  return res;
+};
+
+export const apiGetActivePositionInfo = async (intervals?: number[]) => {
+  let condition = {};
+  if (intervals) {
+    condition = {
+      status: PositionStatus.active,
+      "swapInterval.id": { $in: intervals },
+    };
+  } else {
+    condition = {
+      status: PositionStatus.active,
+    };
+  }
+  return await DCA.find(condition);
 };
