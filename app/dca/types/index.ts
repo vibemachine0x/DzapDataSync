@@ -18,6 +18,7 @@ export type PositionHistory = {
 };
 
 export type DCAPositionInfo = {
+  _id?: string;
   id: string;
   account: string;
   chainId: number;

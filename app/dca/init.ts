@@ -1,4 +1,3 @@
-import { startScript } from "./../testScript_ts";
 import { DCAEvents, NetworkIDs } from "./enums";
 import { getContract, listenEvents } from "./utils";
 import {
@@ -20,9 +19,6 @@ const subscribeEvents = (chainId: number) => {
 };
 
 export const initDCA = () => {
-  if (false) {
-    startScript();
-  }
-  subscribeEvents(NetworkIDs.polygon);
+  //   subscribeEvents(NetworkIDs.polygon);
   subscribeEvents(NetworkIDs.zkSync);
 };

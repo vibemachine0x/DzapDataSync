@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node .",
     "build": "tsc",
-    "dev": "nodemon"
+    "dev": "nodemon",
+    "deploy": "yarn build && gcloud run deploy dzap-data-sync --source . --min-instances 0 --memory 256Mi --platform managed --region europe-north1 --allow-unauthenticated"
   },
   "author": "",
   "license": "ISC",

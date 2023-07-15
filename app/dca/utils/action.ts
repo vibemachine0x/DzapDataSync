@@ -1,12 +1,15 @@
 import { BigNumber } from "ethers";
 import { getUnixTimestamp, intervalsFromBytes } from ".";
 import { PositionStatus } from "../enums";
+import db from "../models";
 import {
   apiGetActivePositionInfo,
   apiGetPositionDetails,
 } from "../persistence/sync.persistence";
 import { createPositionService } from "../services/sync.services";
 import { DCAPositionInfo, PositionHistory } from "../types";
+
+const DCA = db.dca;
 
 export const handleCreateEventData = async (data: any, contract: any) => {
   try {
@@ -127,39 +130,51 @@ export const handleSwapEventData = async (data: any, contract: any) => {
     intervals.push(...intervalsFromBytes(swapInfo.intervalsInSwap));
   });
   const activePositions = await apiGetActivePositionInfo(intervals);
-  const positionDetails = await Promise.all(
+  const positionDetailsFromBC = await Promise.all(
     activePositions.map(
       async (position: DCAPositionInfo) =>
         await contract.getPositionDetails(position.id)
     )
   );
-  activePositions.forEach((position: DCAPositionInfo, index: number) => {
-    const remainingSwaps = BigNumber.from(position.remainingSwaps).sub(1);
-    if (remainingSwaps.eq(0)) {
-      position.status = PositionStatus.completed;
+  const bulkReplace = activePositions.map(
+    (position: DCAPositionInfo, index: number) => {
+      const remainingSwaps = BigNumber.from(position.remainingSwaps).sub(1);
+      if (remainingSwaps.eq(0)) {
+        position.status = PositionStatus.completed;
+      }
+      position.remainingSwaps = remainingSwaps.toString();
+      position.totalExecutedSwaps = BigNumber.from(position.totalExecutedSwaps)
+        .add(1)
+        .toString();
+      position.totalAmountSwapped = BigNumber.from(position.rate)
+        .add(position.totalAmountSwapped)
+        .toString();
+      const userReturnAmount = positionDetailsFromBC[index].swapped.sub(
+        position.toWithdraw
+      );
+      position.totalAmountReturned = BigNumber.from(userReturnAmount)
+        .add(position.totalAmountReturned)
+        .toString();
+      position.toWithdraw = positionDetailsFromBC[index].swapped.toString();
+      position.history.push({
+        createdAtTimestamp: currentTimestamp,
+        fromAmount: position.rate,
+        toAmount: userReturnAmount.toString(),
+        action: PositionStatus.swapped,
+        transactionHash: "eventData.transactionHash",
+      });
+      return {
+        replaceOne: {
+          upsert: true,
+          filter: {
+            _id: position._id,
+          },
+          replacement: position,
+        },
+      };
     }
-    position.remainingSwaps = remainingSwaps.toString();
-    position.totalExecutedSwaps = BigNumber.from(position.remainingSwaps)
-      .add(1)
-      .toString();
-    position.totalAmountSwapped = BigNumber.from(position.rate)
-      .add(position.totalAmountSwapped)
-      .toString();
-    const userReturnAmount =
-      positionDetails[index].swapped.sub(position.toWithdraw) || 0;
-    position.totalAmountReturned = BigNumber.from(userReturnAmount)
-      .add(position.totalAmountReturned)
-      .toString();
-    position.history.push({
-      createdAtTimestamp: currentTimestamp,
-      fromAmount: position.rate,
-      toAmount: userReturnAmount.toString(),
-      action: PositionStatus.swapped,
-      transactionHash: eventData.transactionHash,
-    });
-    activePositions[index] = position;
-    activePositions[index].save();
-  });
+  );
+  DCA.bulkWrite(bulkReplace);
 };
 
 export const handleClaimEventData = async (data: any, contract: any) => {
@@ -175,15 +190,15 @@ export const handleClaimEventData = async (data: any, contract: any) => {
     positionId
   );
   position.toWithdraw = "0";
-  position.totalWithdrawn = BigNumber.from(position.totalWithdrawn).add(
-    swapped
-  );
+  position.totalWithdrawn = BigNumber.from(position.totalWithdrawn)
+    .add(swapped)
+    .toString();
   const claimData: PositionHistory = {
     action: PositionStatus.claim,
     createdAtTimestamp: getUnixTimestamp(),
     transactionHash: eventData.transactionHash,
     recipient,
-    swapped: swapped.toString(),
+    returnedToAmount: swapped.toString(),
   };
   position.history.push(claimData);
   position.save();
@@ -211,9 +226,9 @@ export const handleTerminateEventData = async (data: any, contract: any) => {
   position.history.push(terminationData);
   position.status = PositionStatus.terminated;
   position.toWithdraw = "0";
-  position.totalWithdrawn = BigNumber.from(position.totalWithdrawn).add(
-    swapped
-  );
+  position.totalWithdrawn = BigNumber.from(position.totalWithdrawn)
+    .add(swapped)
+    .toString();
   position.lastUpdatedAt = currentTimestamp;
   position.save();
 };

@@ -1,7 +1,7 @@
 import { Contract } from "zksync-web3";
 
 import { ethers } from "ethers";
-import { DCA_CONTRACTS } from "../Core/Config/contract.config";
+import { DCA_CONTRACTS } from "../core/config/contract.config";
 import { JSON_RPC_PROVIDER } from "../core/config/chain.config";
 import { INTERVALS } from "../core/constants";
 export const getChecksumAddress = (address: string) =>
