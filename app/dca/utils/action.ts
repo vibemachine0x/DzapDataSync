@@ -1,15 +1,12 @@
 import { BigNumber } from "ethers";
 import { getUnixTimestamp, intervalsFromBytes } from ".";
 import { PositionStatus } from "../enums";
-import db from "../models";
 import {
   apiGetActivePositionInfo,
   apiGetPositionDetails,
 } from "../persistence/sync.persistence";
 import { createPositionService } from "../services/sync.services";
 import { DCAPositionInfo, PositionHistory } from "../types";
-
-const DCA = db.dca;
 
 export const handleCreateEventData = async (data: any, contract: any) => {
   try {
@@ -121,60 +118,91 @@ export const handleModifyEventData = async (data: any, contract: any) => {
   position.save();
 };
 
-export const handleSwapEventData = async (data: any, contract: any) => {
-  const swappedData = data[2];
-  const eventData = data[3];
+const updateSwapInfo = (
+  position: any,
+  transactionHash: string,
+  userReturnAmount: BigNumber,
+  toWithdraw: string
+) => {
   const currentTimestamp = getUnixTimestamp();
-  const intervals: number[] = [];
-  swappedData.forEach((swapInfo: any) => {
-    intervals.push(...intervalsFromBytes(swapInfo.intervalsInSwap));
+  const remainingSwaps = BigNumber.from(position.remainingSwaps).sub(1);
+  if (remainingSwaps.eq(0)) {
+    position.status = PositionStatus.completed;
+  }
+  position.remainingSwaps = remainingSwaps.toString();
+  position.totalExecutedSwaps = BigNumber.from(position.totalExecutedSwaps)
+    .add(1)
+    .toString();
+  position.totalAmountSwapped = BigNumber.from(position.rate)
+    .add(position.totalAmountSwapped)
+    .toString();
+
+  position.totalAmountReturned = BigNumber.from(userReturnAmount)
+    .add(position.totalAmountReturned)
+    .toString();
+  position.toWithdraw = toWithdraw;
+  position.history.push({
+    createdAtTimestamp: currentTimestamp,
+    fromAmount: position.rate,
+    toAmount: userReturnAmount.toString(),
+    action: PositionStatus.swapped,
+    transactionHash,
   });
-  const activePositions = await apiGetActivePositionInfo(intervals);
-  const positionDetailsFromBC = await Promise.all(
-    activePositions.map(
-      async (position: DCAPositionInfo) =>
-        await contract.getPositionDetails(position.id)
-    )
-  );
-  const bulkReplace = activePositions.map(
-    (position: DCAPositionInfo, index: number) => {
-      const remainingSwaps = BigNumber.from(position.remainingSwaps).sub(1);
-      if (remainingSwaps.eq(0)) {
-        position.status = PositionStatus.completed;
-      }
-      position.remainingSwaps = remainingSwaps.toString();
-      position.totalExecutedSwaps = BigNumber.from(position.totalExecutedSwaps)
-        .add(1)
-        .toString();
-      position.totalAmountSwapped = BigNumber.from(position.rate)
-        .add(position.totalAmountSwapped)
-        .toString();
-      const userReturnAmount = positionDetailsFromBC[index].swapped.sub(
-        position.toWithdraw
-      );
-      position.totalAmountReturned = BigNumber.from(userReturnAmount)
-        .add(position.totalAmountReturned)
-        .toString();
-      position.toWithdraw = positionDetailsFromBC[index].swapped.toString();
-      position.history.push({
-        createdAtTimestamp: currentTimestamp,
-        fromAmount: position.rate,
-        toAmount: userReturnAmount.toString(),
-        action: PositionStatus.swapped,
-        transactionHash: "eventData.transactionHash",
-      });
-      return {
-        replaceOne: {
-          upsert: true,
-          filter: {
-            _id: position._id,
-          },
-          replacement: position,
-        },
-      };
-    }
-  );
-  DCA.bulkWrite(bulkReplace);
+  return position.save();
+};
+
+export const handleSwapEventData = async (data: any, contract: any) => {
+  try {
+    const swappedData = data[2];
+    const transactionHash = data[3].transactionHash;
+    const intervals: string[] = [];
+    swappedData.forEach((swapInfo: any) => {
+      console.log("swapInfo", JSON.stringify(swapInfo));
+      intervals.push(...intervalsFromBytes(swapInfo.intervalsInSwap));
+    });
+    console.log("intervals", intervals.toString());
+    const activePositions = await apiGetActivePositionInfo(intervals);
+    console.log("activePositions", JSON.stringify(activePositions));
+
+    const positionDetailsFromBC = await Promise.all(
+      activePositions.map(
+        async (position: DCAPositionInfo) =>
+          await contract.getPositionDetails(position.id)
+      )
+    );
+    const response = await Promise.all(
+      activePositions.map(
+        async (
+          {
+            account,
+            contract: contractAddress,
+            id: positionId,
+            toWithdraw,
+          }: DCAPositionInfo,
+          index: number
+        ) => {
+          const userReturnAmount =
+            positionDetailsFromBC[index].swapped.sub(toWithdraw);
+          console.log("userReturnAmount", userReturnAmount.toString());
+          const claimable = positionDetailsFromBC[index].swapped.toString();
+          const position = await apiGetPositionDetails(
+            account,
+            contractAddress,
+            positionId
+          );
+          return await updateSwapInfo(
+            position,
+            transactionHash,
+            userReturnAmount,
+            claimable
+          );
+        }
+      )
+    );
+    console.log("Swap response", JSON.stringify(response));
+  } catch (error) {
+    console.log("Swap error", JSON.stringify(error));
+  }
 };
 
 export const handleClaimEventData = async (data: any, contract: any) => {

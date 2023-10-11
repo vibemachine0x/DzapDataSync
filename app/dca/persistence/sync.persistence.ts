@@ -3,7 +3,7 @@ import db from "../models";
 
 const DCA = db.dca;
 
-export const apiCreatePosition = async (request: number) => {
+export const apiCreatePosition = async (request:any) => {
   const dca = new DCA(request);
   const res = await dca.save(dca);
   return res;
@@ -12,7 +12,7 @@ export const apiCreatePosition = async (request: number) => {
 export const apiGetPositionDetails = async (
   account: string,
   contract: string,
-  positionId: number
+  positionId: string
 ) => {
   const condition = {
     account: { $regex: new RegExp(account) },
@@ -34,7 +34,7 @@ export const apiUpdatePositionById = async (account: string) => {
   return res;
 };
 
-export const apiGetActivePositionInfo = async (intervals?: number[]) => {
+export const apiGetActivePositionInfo = async (intervals?: string[]) => {
   let condition = {};
   if (intervals) {
     condition = {
